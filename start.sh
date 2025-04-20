@@ -5,4 +5,4 @@ if ! command -v ffmpeg &> /dev/null; then
     apt-get update && apt-get install -y ffmpeg
 fi
 
-python telegram-music-bot.py
+python bot.py
