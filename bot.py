@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 import tempfile
 import logging
 import shutil
@@ -9,18 +8,22 @@ from pathlib import Path
 import requests
 from PIL import Image
 from io import BytesIO
-import telebot
-from telebot.async_telebot import AsyncTeleBot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from youtubesearchpython import VideosSearch
 from pytubefix import YouTube
+
 load_dotenv()
 
 API_TOKEN = os.getenv("API_TOKEN")
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "downloads"))
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 search_cache = {}
@@ -66,17 +69,14 @@ A lightning-fast music downloader bot that delivers premium quality MP3s (320kbp
 Powered by advanced streaming technology for instant downloads.
 """
 
-@bot.message_handler(commands=['start'])
-async def handle_start(message):
-    await bot.send_message(message.chat.id, WELCOME_MSG, parse_mode='Markdown')
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(WELCOME_MSG, parse_mode='Markdown')
 
-@bot.message_handler(commands=['help'])
-async def handle_help(message):
-    await bot.send_message(message.chat.id, HELP_MSG, parse_mode='Markdown')
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(HELP_MSG, parse_mode='Markdown')
 
-@bot.message_handler(commands=['about'])
-async def handle_about(message):
-    await bot.send_message(message.chat.id, ABOUT_MSG, parse_mode='Markdown')
+async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(ABOUT_MSG, parse_mode='Markdown')
 
 async def search_songs(query, max_results=6):
     try:
@@ -100,43 +100,41 @@ async def search_songs(query, max_results=6):
         logger.error(f"Error searching songs: {e}")
         return []
 
-@bot.message_handler(func=lambda msg: True)
-async def handle_song_search(message):
-    query = message.text.strip()
+async def handle_song_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.message.text.strip()
     logger.info(f"Searching for: {query}")
     
-    status_msg = await bot.send_message(message.chat.id, "🎵 *Finding your music...*", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🎵 *Finding your music...*", parse_mode='Markdown')
     
     try:
         songs = await search_songs(query)
         
         if not songs:
-            await bot.edit_message_text("❌ No results found. Try another song name.", 
-                                 message.chat.id, 
-                                 status_msg.message_id)
+            await status_msg.edit_text("❌ No results found. Try another song name.")
             return
         
-        keyboard = InlineKeyboardMarkup(row_width=1)
+        keyboard = []
         
-        search_cache[message.chat.id] = songs
+        chat_id = update.effective_chat.id
+        search_cache[chat_id] = songs
         
         for song in songs:
             label = f"{song['title']} - {song['artist']} [{song['duration']}]"
             if len(label) > 60:
                 label = label[:57] + "..."
                 
-            keyboard.add(InlineKeyboardButton(label, callback_data=f"song_{song['index']}"))
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"song_{song['index']}")])
         
-        await bot.edit_message_text(f"🎵 *Select a song to download:*",
-                             message.chat.id, 
-                             status_msg.message_id,
-                             reply_markup=keyboard,
-                             parse_mode='Markdown')
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await status_msg.edit_text(
+            f"🎵 *Select a song to download:*",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
     except Exception as e:
         logger.error(f"Search error: {e}")
-        await bot.edit_message_text("❌ Search error. Please try again later.", 
-                             message.chat.id, 
-                             status_msg.message_id)
+        await status_msg.edit_text("❌ Search error. Please try again later.")
 
 def convert_to_high_quality(input_file, output_file):
     try:
@@ -217,13 +215,15 @@ async def download_song(video_id):
                 pass
         return None
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('song_'))
-async def handle_song_selection(call):
-    chat_id = call.message.chat.id
-    data_parts = call.data.split("_")
+async def handle_song_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    chat_id = update.effective_chat.id
+    data_parts = query.data.split("_")
     
     if len(data_parts) < 2 or chat_id not in search_cache:
-        await bot.answer_callback_query(call.id, "Session expired. Please search again.")
+        await query.edit_message_text("Session expired. Please search again.")
         return
     
     song_index = data_parts[1]
@@ -235,73 +235,74 @@ async def handle_song_selection(call):
             break
     
     if not selected_song:
-        await bot.answer_callback_query(call.id, "Song not found. Please search again.")
+        await query.edit_message_text("Song not found. Please search again.")
         return
     
-    await bot.answer_callback_query(call.id)
-    
-    status_msg = await bot.edit_message_text(
+    status_msg = await query.edit_message_text(
         f"⬇️ *Downloading... Wait For It Man*",
-        chat_id,
-        call.message.message_id,
         parse_mode='Markdown'
     )
     
-    async def download_and_send():
-        download_result = await download_song(selected_song['video_id'])
-        
-        if not download_result:
-            await bot.edit_message_text(
-                f"❌ *Download failed.* Please try another song.",
-                chat_id,
-                status_msg.message_id,
-                parse_mode='Markdown'
-            )
-            return
-        
-        try:
-            with open(download_result['file_path'], 'rb') as audio_file:
-                thumbnail_file = None
-                if download_result['thumbnail']:
-                    thumbnail_file = open(download_result['thumbnail'], 'rb')
-                
-                await bot.send_audio(
-                    chat_id,
-                    audio_file,
-                    caption=f"🎵 {download_result['title']} - {download_result['performer']}",
-                    title=download_result['title'],
-                    performer=download_result['performer'],
-                    duration=download_result['duration'],
-                    thumb=thumbnail_file,
-                    reply_to_message_id=call.message.reply_to_message.message_id if call.message.reply_to_message else None
-                )
-                
-                if thumbnail_file:
-                    thumbnail_file.close()
-                
-            await bot.delete_message(chat_id, status_msg.message_id)
-            
-        except Exception as e:
-            logger.error(f"Send error: {e}")
-            await bot.edit_message_text(
-                f"❌ *Error sending file.* Please try again.",
-                chat_id,
-                status_msg.message_id,
-                parse_mode='Markdown'
-            )
-        finally:
-            try:
-                shutil.rmtree(download_result['tmp_dir'], ignore_errors=True)
-            except:
-                pass
+    download_result = await download_song(selected_song['video_id'])
     
-    asyncio.create_task(download_and_send())
+    if not download_result:
+        await status_msg.edit_text(
+            f"❌ *Download failed.* Please try another song.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    try:
+        with open(download_result['file_path'], 'rb') as audio_file:
+            thumbnail_file = None
+            
+            if download_result['thumbnail']:
+                with open(download_result['thumbnail'], 'rb') as thumb:
+                    thumbnail_bytes = thumb.read()
+            else:
+                thumbnail_bytes = None
+            
+            reply_to_message_id = None
+            if query.message.reply_to_message:
+                reply_to_message_id = query.message.reply_to_message.message_id
+            
+            await context.bot.send_audio(
+                chat_id=chat_id,
+                audio=audio_file,
+                caption=f"🎵 {download_result['title']} - {download_result['performer']}",
+                title=download_result['title'],
+                performer=download_result['performer'],
+                duration=download_result['duration'],
+                thumb=thumbnail_bytes if thumbnail_bytes else None,
+                reply_to_message_id=reply_to_message_id
+            )
+        await context.bot.delete_message(chat_id=chat_id, message_id=status_msg.message_id)
+        
+    except Exception as e:
+        logger.error(f"Send error: {e}")
+        await status_msg.edit_text(
+            f"❌ *Error sending file.* Please try again.",
+            parse_mode='Markdown'
+        )
+    finally:
+        try:
+            shutil.rmtree(download_result['tmp_dir'], ignore_errors=True)
+        except:
+            pass
 
-async def main():
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Update {update} caused error {context.error}")
+
+def main() -> None:
+    application = Application.builder().token(API_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("about", about_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_song_search))
+    application.add_handler(CallbackQueryHandler(handle_song_selection, pattern="^song_"))
+    application.add_error_handler(error_handler)
     logger.info("T2MusicBot is starting...")
-    me = await bot.get_me()
-    logger.info(f"Bot started as @{me.username}")
-    await bot.polling(non_stop=True, timeout=60)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
