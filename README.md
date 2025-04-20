@@ -24,8 +24,8 @@ A lightning-fast Telegram bot that downloads and delivers high-quality MP3s with
 
 1. Clone the repository
 ```bash
-git clone https://github.com/your-username/t2musicbot.git
-cd t2musicbot
+git clone https://github.com/Tazhossain/musicbot/bot.git
+cd bot.py
 ```
 
 2. Install required dependencies
@@ -35,13 +35,13 @@ pip install -r requirements.txt
 
 3. Set up your Telegram Bot API token
 ```bash
-# Edit telegram-music-bot.py to add your token
+# Edit .env to add your token
 API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 ```
 
 4. Run the bot
 ```bash
-python telegram-music-bot.py
+python bot.py
 ```
 
 ## 🤖 Bot Commands
@@ -55,7 +55,7 @@ python telegram-music-bot.py
 
 ```
 t2musicbot/
-├── telegram-music-bot.py    # Main bot code
+├── bot.py    # Main bot code
 ├── requirements.txt         # Python dependencies
 ├── README.md               # This documentation
 └── downloads/              # Temporary download directory (auto-created)
