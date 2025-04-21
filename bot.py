@@ -273,7 +273,7 @@ async def handle_song_selection(update: Update, context: ContextTypes.DEFAULT_TY
                 title=download_result['title'],
                 performer=download_result['performer'],
                 duration=download_result['duration'],
-                thumb=thumbnail_bytes if thumbnail_bytes else None,
+                thumbnail=thumbnail_bytes if thumbnail_bytes else None,
                 reply_to_message_id=reply_to_message_id
             )
         await context.bot.delete_message(chat_id=chat_id, message_id=status_msg.message_id)
@@ -294,7 +294,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Update {update} caused error {context.error}")
 
 def main() -> None:
-    application = Application.builder().token(API_TOKEN).build()
+    application = Application.builder().token(API_TOKEN).read_timeout(30).write_timeout(30).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about_command))
