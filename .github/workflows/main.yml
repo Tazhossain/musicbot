@@ -20,6 +20,9 @@ jobs:
         with:
           node-version: "18"
 
+      - name: Install npm package (youtube-po-token-generator)
+        run: npm install youtube-po-token-generator
+
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
